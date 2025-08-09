@@ -1,0 +1,225 @@
+<!--
+WhatsApp Session Generator (single-file frontend + server snippets)
+Bot name: PASIYA-MD
+
+This document contains:
+1) A simple frontend (HTML + JS) that connects to a backend WebSocket to receive QR image and pair/session data.
+2) A Node.js backend example using Baileys (WhatsApp Web library) that emits QR & session info over WebSocket.
+
+IMPORTANT:
+- You must run the backend on a server (Node.js). The frontend only displays data the backend provides.
+- Using unofficial WhatsApp libraries may violate WhatsApp's Terms of Service. Use at your own risk.
+- This is a developer example for legitimate automation (bots you own/manage).
+--><!doctype html>
+
+<html lang="si">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PASIYA-MD — WhatsApp Session Generator</title>
+  <style>
+    :root{--bg:#0b0f1a;--card:#0f1724;--accent:#7c3aed}
+    body{margin:0;font-family:Inter,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#030417 0%,#07102a 100%);color:#e6eef8;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+    .app{width:100%;max-width:980px;background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);border-radius:16px;padding:20px;box-shadow:0 10px 30px rgba(2,6,23,0.7)}
+    header{display:flex;gap:12px;align-items:center}
+    .logo{width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,var(--accent),#06b6d4);display:flex;align-items:center;justify-content:center;font-weight:700}
+    h1{font-size:20px;margin:0}
+    p.lead{margin:0;color:#c9d5eecc}
+    .grid{display:grid;grid-template-columns:320px 1fr;gap:16px;margin-top:18px}
+    .card{background:var(--card);padding:14px;border-radius:12px;min-height:220px}
+    .qr{width:100%;height:320px;background:#061025;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+    img.qrimg{max-width:100%;max-height:100%}
+    .meta{display:flex;flex-direction:column;gap:8px}
+    .row{display:flex;gap:8px;align-items:center}
+    .btn{background:var(--accent);border:none;padding:8px 12px;border-radius:8px;color:white;cursor:pointer}
+    .muted{color:#9fb0d6}
+    .textarea{background:#081228;border:1px solid rgba(255,255,255,0.03);padding:10px;border-radius:8px;font-family:monospace;color:#dff}
+    footer{margin-top:14px;color:#9fb0d6;font-size:13px}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="logo">PM</div>
+      <div>
+        <h1>PASIYA-MD — WhatsApp Session Generator</h1>
+        <p class="lead">QR & Pair code viewer for your bot. Backend must be running and connected to WhatsApp.</p>
+      </div>
+    </header><div class="grid">
+  <div class="card">
+    <div style="display:flex;flex-direction:column;height:100%">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong>QR / Pair</strong>
+        <div class="muted">Bot: <strong>PASIYA-MD</strong></div>
+      </div>
+      <div class="qr" id="qrwrap">
+        <div class="muted" id="qrplaceholder">Waiting for QR from backend...</div>
+        <!-- QR image will be inserted here -->
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button class="btn" id="copySessionBtn">Copy Session</button>
+        <button class="btn" id="refreshBtn">Refresh</button>
+        <div style="flex:1"></div>
+        <div class="muted">Status: <span id="statusText">disconnected</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="meta">
+      <div><strong>Session / Pair data</strong></div>
+      <div class="textarea" id="sessionData">No session data yet.</div>
+      <div class="muted">Pair code is usually a short string shown once during pairing. Session ID may look like a JSON object or a key blob (base64).</div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn" id="downloadBtn">Download Session JSON</button>
+        <button class="btn" id="clearBtn">Clear</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <div>Notes: Backend must run a WhatsApp Web client (e.g., Baileys or Venom) and send QR as base64 image and session data via WebSocket or HTTP SSE.</div>
+</footer>
+
+  </div><script>
+  // Simple frontend WebSocket client
+  const statusText = document.getElementById('statusText');
+  const qrwrap = document.getElementById('qrwrap');
+  const qrplaceholder = document.getElementById('qrplaceholder');
+  const sessionDataEl = document.getElementById('sessionData');
+
+  let ws;
+  function connect(){
+    statusText.textContent = 'connecting...';
+    // change the URL to your backend websocket endpoint
+    ws = new WebSocket('ws://' + location.hostname + ':3000');
+
+    ws.onopen = ()=>{ statusText.textContent = 'connected'; }
+    ws.onclose = ()=>{ statusText.textContent = 'disconnected'; setTimeout(connect,2000); }
+    ws.onerror = (e)=>{ console.error(e); }
+
+    ws.onmessage = (ev)=>{
+      try{
+        const msg = JSON.parse(ev.data);
+        // msg can be { type: 'qr', data: 'data:image/png;base64,...' } or { type: 'session', data: {...} }
+        if(msg.type === 'qr'){
+          qrplaceholder.style.display = 'none';
+          // insert image
+          let img = document.querySelector('img.qrimg');
+          if(!img){ img = document.createElement('img'); img.className='qrimg'; qrwrap.appendChild(img); }
+          img.src = msg.data;
+        } else if(msg.type === 'session'){
+          sessionDataEl.textContent = JSON.stringify(msg.data, null, 2);
+        } else if(msg.type === 'pair'){ // optional short pair code
+          sessionDataEl.textContent = 'Pair code: ' + msg.data + '\n\n' + sessionDataEl.textContent;
+        }
+      }catch(err){ console.error('invalid msg', err); }
+    }
+  }
+  connect();
+
+  document.getElementById('copySessionBtn').onclick = ()=>{
+    navigator.clipboard.writeText(sessionDataEl.textContent || '').then(()=>alert('Copied'));
+  }
+  document.getElementById('refreshBtn').onclick = ()=>{ ws && ws.send(JSON.stringify({ action:'refreshQR' })); }
+  document.getElementById('downloadBtn').onclick = ()=>{
+    const blob = new Blob([sessionDataEl.textContent || ''], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download='session.json'; a.click(); URL.revokeObjectURL(url);
+  }
+  document.getElementById('clearBtn').onclick = ()=>{ sessionDataEl.textContent=''; const img = document.querySelector('img.qrimg'); if(img) img.remove(); qrplaceholder.style.display='block'; }
+</script><hr style="margin-top:22px;border:none;border-top:1px solid rgba(255,255,255,0.04)"><!--
+Backend example (Node.js) - save as server.js
+Requires: node >= 16, npm install @adiwajshing/baileys express ws
+
+NOTE: This is an example using Baileys (WhatsApp Web library). Replace with the library you prefer.
+--><pre style="background:#001026;color:#cfe; padding:12px;border-radius:8px;overflow:auto;">
+// server.js (Node.js)
+// npm i @adiwajshing/baileys express ws
+
+const fs = require('fs');
+const http = require('http');
+const express = require('express');
+const WebSocket = require('ws');
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@adiwajshing/baileys');
+
+(async ()=>{
+  const app = express();
+  const server = http.createServer(app);
+  const wss = new WebSocket.Server({ server });
+
+  // Serve the frontend (place index.html in the same folder) or host separately
+  app.use(express.static(__dirname));
+
+  // WebSocket broadcast helper
+  function broadcast(obj){
+    const s = JSON.stringify(obj);
+    wss.clients.forEach(c=>{ if(c.readyState===WebSocket.OPEN) c.send(s); });
+  }
+
+  // Baileys auth state
+  const { state, saveCreds } = await useMultiFileAuthState('./auth_info');
+  const { version } = await fetchLatestBaileysVersion();
+
+  const sock = makeWASocket({ auth: state, version });
+
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('connection.update', (update) => {
+    const { connection, qr, lastDisconnect } = update;
+    if(qr){
+      // send QR as PNG base64 to frontend
+      broadcast({ type:'qr', data: 'data:image/png;base64,' + qr });
+    }
+    if(connection === 'open'){
+      broadcast({ type:'status', data:'open' });
+      // after open, session info is in auth files
+      // read and send a friendly session object
+      try{
+        const files = fs.readdirSync('./auth_info');
+        const sess = {};
+        for(const f of files){ sess[f]=fs.readFileSync('./auth_info/'+f,'utf8'); }
+        broadcast({ type:'session', data: sess });
+      }catch(e){ console.error(e); }
+    }
+    if(lastDisconnect && lastDisconnect.error){
+      console.log('disconnected', lastDisconnect.error);
+    }
+  });
+
+  // handle WS messages
+  wss.on('connection', ws=>{
+    ws.on('message', msg=>{
+      try{
+        const o = JSON.parse(msg.toString());
+        if(o.action === 'refreshQR'){
+          // force getting a new QR by restarting auth or other means
+          // simple approach: destroy and re-initialize socket (implementation dependent)
+          console.log('refresh requested');
+        }
+      }catch(e){ }
+    });
+  });
+
+  const PORT = 3000;
+  server.listen(PORT, ()=>console.log('listening on', PORT));
+})();
+</pre><!--
+How session / pair data appears (explanation):
+- QR: A QR string or image needs to be scanned by the WhatsApp mobile app. Libraries convert that to a PNG base64 or raw string.
+- Pair code: Some libraries show a short pairing code (rare for WhatsApp Web — more for mobile pairing flows). If present, it will be a short alphanumeric string.
+- Session: After successful login, the library stores credentials as JSON/blobs (keys, enc keys, tokens) — these are your "session files". They can be saved as session.json or a folder of files.
+
+Security reminders:
+- Never share your session files publicly. They allow full access to that WhatsApp account.
+- Keep backups encrypted and only for accounts you own.
+
+If you want, I can:
+- give a ready-to-run GitHub repo structure with Dockerfile and instructions;
+- help deploy on free hosts (Replit/Render) and point the frontend to the deployed backend;
+- convert the frontend into a single-page React app and the backend into a ready Heroku/Render deploy script.
+
+ඔබට මෙකෙන් පසුව deploy කරන්න ඕනේද? එහෙත් මම මේ code එක canvas (file) එකට දාලා තියෙනවා — ඒක බලන්න. :) 
+--></body>
+</html>
